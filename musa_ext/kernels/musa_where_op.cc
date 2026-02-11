@@ -74,7 +74,7 @@ class MusaWhereOp : public MusaOpKernel {
 
     // 6. 拷贝数据
     auto dst_ptr = final_output->tensor_data().data();
-    musaMemcpyAsync(dst_ptr, scratch_ptr, captured_size, musaMemcpyDeviceToDevice, h.GetStream());
+    musaMemcpyAsync((void*)dst_ptr, scratch_ptr, captured_size, musaMemcpyDeviceToDevice, h.GetStream());
   }
 };
 
