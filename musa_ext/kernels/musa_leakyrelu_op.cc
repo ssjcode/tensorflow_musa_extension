@@ -27,15 +27,13 @@ class MusaLeakyReluOp : public MusaOpKernel {
     mTensor t_input = CreateMTensor(input, format_);
     mTensor t_output = CreateMTensor(*output, format_);
 
-    
     ::musa::dnn::Unary op;
     MTOP_CHECK_OK(op.SetMode(::musa::dnn::Unary::Mode::LEAKY_RELU),
                   "Set LeakyRelu", ctx);
     MTOP_CHECK_OK(op.SetAlpha(static_cast<double>(alpha_)),
                   "Set LeakyRelu alpha", ctx);
 
-    MTOP_CHECK_OK_RUN(op.Run(handle, t_output, t_input),
-                      "LeakyRelu Run", ctx);
+    MTOP_CHECK_OK_RUN(op.Run(handle, t_output, t_input), "LeakyRelu Run", ctx);
   }
 
  private:

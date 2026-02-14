@@ -1,17 +1,17 @@
-# Copyright 2026 The TensorFlow MUSA Authors. All Rights Reserved.
+#Copyright 2026 The TensorFlow MUSA Authors.All Rights Reserved.
 #
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
+#Licensed under the Apache License, Version 2.0(the "License");
+#you may not use this file except in compliance with the License.
+#You may obtain a copy of the License at
 #
-#     http://www.apache.org/licenses/LICENSE-2.0
+#http:  // www.apache.org/licenses/LICENSE-2.0
 #
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-# ==============================================================================
+#Unless required by applicable law or agreed to in writing, software
+#distributed under the License is distributed on an "AS IS" BASIS,
+#WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#See the License for the specific language governing permissions and
+#limitations under the License.
+#== == == == == == == == == == == == == == == == == == == == == == == == == == \
 
 """Tests for MUSA LeakyReLU operator."""
 
@@ -32,16 +32,16 @@ class LeakyReluOpTest(MUSATestCase):
       input_np = np.array(input_data, dtype=dtype.as_numpy_dtype)
     
     x = tf.constant(input_np, dtype=dtype)
-    
-    # Test on CPU
+
+#Test on CPU
     with tf.device('/CPU:0'):
       cpu_result = tf.nn.leaky_relu(x, alpha=alpha)
-    
-    # Test on MUSA
+
+#Test on MUSA
     with tf.device('/device:MUSA:0'):
       musa_result = tf.nn.leaky_relu(x, alpha=alpha)
-    
-    # Compare results
+
+#Compare results
     if dtype in [tf.float16, tf.bfloat16]:
       cpu_result_f32 = tf.cast(cpu_result, tf.float32)
       musa_result_f32 = tf.cast(musa_result, tf.float32)

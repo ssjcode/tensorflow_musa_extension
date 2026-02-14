@@ -1,17 +1,17 @@
-# Copyright 2026 The TensorFlow MUSA Authors. All Rights Reserved.
+#Copyright 2026 The TensorFlow MUSA Authors.All Rights Reserved.
 #
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
+#Licensed under the Apache License, Version 2.0(the "License");
+#you may not use this file except in compliance with the License.
+#You may obtain a copy of the License at
 #
-#     http://www.apache.org/licenses/LICENSE-2.0
+#http:  // www.apache.org/licenses/LICENSE-2.0
 #
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-# ==============================================================================
+#Unless required by applicable law or agreed to in writing, software
+#distributed under the License is distributed on an "AS IS" BASIS,
+#WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#See the License for the specific language governing permissions and
+#limitations under the License.
+#== == == == == == == == == == == == == == == == == == == == == == == == == == \
 
 """Tests for MUSA LeakyReluGrad operator."""
 
@@ -25,8 +25,13 @@ class LeakyReluGradOpTest(MUSATestCase):
   """Tests for MUSA LeakyReluGrad operator."""
 
   def _test_leakyrelu_grad_direct(self, shape, dtype, alpha=0.2, rtol=1e-3, atol=1e-3):
-
-    # Prepare Data
+    """
+    Test raw LeakyReluGrad op directly:
+      dx = dy * (x > 0 ? 1 : alpha)
+    Notes:
+      - TF 通常把 x==0 归到 <=0 分支（乘 alpha）
+    """
+#Prepare Data
     np_dtype = np.float32 if dtype == tf.bfloat16 else dtype.as_numpy_dtype
 
     x_np = np.random.randn(*shape).astype(np_dtype)
@@ -35,7 +40,7 @@ class LeakyReluGradOpTest(MUSATestCase):
     x = tf.constant(x_np, dtype=dtype)
     dy = tf.constant(dy_np, dtype=dtype)
 
-    # Define Operator Wrapper (raw op)
+#Define Operator Wrapper(raw op)
     def op_func(grad_in, feat_in):
       return tf.raw_ops.LeakyReluGrad(
           gradients=grad_in,
@@ -43,7 +48,7 @@ class LeakyReluGradOpTest(MUSATestCase):
           alpha=alpha
       )
 
-    # Compare Results
+#Compare Results
     self._compare_cpu_musa_results(op_func, [dy, x], dtype, rtol=rtol, atol=atol)
 
   def _test_leakyrelu_backprop(self, shape, dtype, alpha=0.2, rtol=1e-3, atol=1e-3):
@@ -52,20 +57,20 @@ class LeakyReluGradOpTest(MUSATestCase):
       y = leaky_relu(x, alpha)
       dx = d(y)/d(x)
     """
-    # Prepare Data
+#Prepare Data
     np_dtype = np.float32 if dtype == tf.bfloat16 else dtype.as_numpy_dtype
 
     x_np = np.random.randn(*shape).astype(np_dtype)
     x = tf.constant(x_np, dtype=dtype)
 
-    # Define Gradient Calculation Wrapper
+#Define Gradient Calculation Wrapper
     def op_func(input_tensor):
       with tf.GradientTape() as tape:
         tape.watch(input_tensor)
         res = tf.nn.leaky_relu(input_tensor, alpha=alpha)
       return tape.gradient(res, input_tensor)
 
-    # Compare Results
+#Compare Results
     self._compare_cpu_musa_results(op_func, [x], dtype, rtol=rtol, atol=atol)
 
   def testLeakyReluGradDirectBasic(self):

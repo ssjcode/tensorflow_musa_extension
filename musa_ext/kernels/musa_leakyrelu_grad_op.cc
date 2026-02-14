@@ -39,11 +39,13 @@ class MusaLeakyReluGradOp : public MusaOpKernel {
     ::musa::dnn::Binary leaky_relu_grad_op;
     leaky_relu_grad_op.SetMode(::musa::dnn::Binary::Mode::LEAKY_RELU_BW);
     leaky_relu_grad_op.SetAlpha(alpha_);
-    auto status = leaky_relu_grad_op.Run(handle, mt_backprops, mt_grads, mt_feats);
+    auto status =
+        leaky_relu_grad_op.Run(handle, mt_backprops, mt_grads, mt_feats);
 
-    OP_REQUIRES(ctx, status == ::musa::dnn::Status::SUCCESS,
-                errors::Internal("MUSA LeakyReluGrad execution failed. Status: ",
-                                 (int)status));
+    OP_REQUIRES(
+        ctx, status == ::musa::dnn::Status::SUCCESS,
+        errors::Internal("MUSA LeakyReluGrad execution failed. Status: ",
+                         (int)status));
   }
 
  private:
