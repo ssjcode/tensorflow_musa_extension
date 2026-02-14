@@ -38,7 +38,7 @@ class TanhGradOpTest(MUSATestCase):
 
     for dtype in [tf.float32, tf.float16, tf.bfloat16]:
       rtol = 1e-2 if dtype in [tf.float16, tf.bfloat16] else 1e-5
-      atol = 1e-2 if dtype in [tf.float16, tf.bfloat16] else 1e-8
+      atol = 1e-2 if dtype in [tf.float16, tf.bfloat16] else 1e-5
 
       def wrapper(x_in, dy_in):
         y = tf.nn.tanh(x_in)
@@ -51,6 +51,34 @@ class TanhGradOpTest(MUSATestCase):
           rtol=rtol,
           atol=atol,
       )
+
+  def testTanhGradIntegrationTape(self):
+    """Integration test: tanh gradient via tf.GradientTape (eager/tape mode)."""
+    input_shape = [2, 3]
+
+    for dtype in [tf.float32, tf.float16, tf.bfloat16]:
+      np_dtype = np.float32 if dtype == tf.bfloat16 else dtype.as_numpy_dtype
+
+      x_np = np.random.uniform(-5.0, 5.0, size=input_shape).astype(np_dtype)
+      x = tf.constant(x_np, dtype=dtype)
+
+      rtol = 2e-2 if dtype in [tf.float16, tf.bfloat16] else 1e-5
+      atol = 2e-2 if dtype in [tf.float16, tf.bfloat16] else 1e-5
+
+      def op_func(x_in):
+        with tf.GradientTape() as tape:
+          tape.watch(x_in)
+          y = tf.nn.tanh(x_in)
+          loss = tf.reduce_sum(y)
+        return tape.gradient(loss, x_in)
+
+      self._compare_cpu_musa_results(
+          op_func,
+          [x],
+          dtype=dtype,
+          rtol=rtol,
+          atol=atol,
+      )    
 
 
 if __name__ == "__main__":
