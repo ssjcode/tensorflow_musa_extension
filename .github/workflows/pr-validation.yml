@@ -9,96 +9,90 @@ permissions:
   contents: read
   pull-requests: write
 
-
 jobs:
   validate:
     runs-on: [self-hosted, musa-gpu]
-     
+    # 🌟 优化点 1：提取全局环境变量，修改时只需改一处
+    env:
+      # 加入 run_attempt 防止网页端手动点重跑时目录冲突
+      PR_PATH: /home/runner/pr_test_${{ github.run_id }}_${{ github.run_attempt }}
+      CONTAINER: Runner
+ 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 1
  
-      - name: Set up Python 3.8
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.8'
+      - name: Copy code into running container
+        run: |
+          docker exec $CONTAINER mkdir -p $PR_PATH
+          docker cp . $CONTAINER:$PR_PATH
+          echo "✅ Code copied to container path: $PR_PATH"
+ 
+      # 🌟 新增：clang-format 代码格式规范检查
+      - name: Check code formatting (clang-format)
+        id: run-format
+        run: |
+          # 查找 C/C++ 相关文件，并执行干跑检查（如果有格式不规范的代码，直接抛出错误）
+          if docker exec $CONTAINER bash -c "cd $PR_PATH && find . -regex '.*\.\(cpp\|hpp\|c\|h\|cu\)' | xargs clang-format --Werror --dry-run"; then
+            echo "status=success" >> $GITHUB_OUTPUT
+          else
+            echo "status=failure" >> $GITHUB_OUTPUT
+          fi
+        continue-on-error: true
 
-      - name: Install system dependencies
+      - name: Run build script
+        id: run-build
+        if: steps.run-format.outputs.status == 'success'
         run: |
-          sudo apt update
-          sudo apt install -y libgl1 libglib2.0-0  # TensorFlow 依赖
- 
-      - name: Install MUSA-aware TensorFlow
-        run: |
-          pip install --upgrade pip
-          pip install tensorflow==2.6.0  # 或你的定制版本
-          pip install -e .  # 安装当前 repo（含 MUSA 扩展）
- 
-      - name: Verify MUSA device availability
-        run: |
-          python3 -c "
-            import tensorflow as tf
-            print('TensorFlow version:', tf.__version__)
-            devices = tf.config.list_physical_devices()
-            print('Available devices:', devices)
-            musa_devices = [d for d in devices if 'MUSA' in d.name or 'GPU' in d.name]
-            assert len(musa_devices) > 0, '❌ No MUSA device found!'
-            print('✅ MUSA device detected:', musa_devices[0])
-            "
- 
-      - name: Run unit tests
-        id: run-tests
-        run: |
-          python -m pytest tests/unit/ -v --tb=short || echo "status=failure" >> $GITHUB_OUTPUT
-          echo "status=success" >> $GITHUB_OUTPUT
-        continue-on-error: true  # 即使失败也继续执行后续步骤（用于发通知）
- 
-      - name: Run integration tests (MUSA operators)
-        id: run-integration
-        if: steps.run-tests.outputs.status == 'success'
-        run: |
-          python -m pytest tests/integration/ -v --tb=short || echo "status=failure" >> $GITHUB_OUTPUT
-          echo "status=success" >> $GITHUB_OUTPUT
+          if docker exec $CONTAINER bash -c "cd $PR_PATH && ./build.sh"; then
+            echo "status=success" >> $GITHUB_OUTPUT
+          else
+            echo "status=failure" >> $GITHUB_OUTPUT
+          fi
         continue-on-error: true
  
-      - name: Comment PR with result (success)
-        if: steps.run-integration.outputs.status == 'success'
-        uses: actions/github-script@v6
-        with:
-          script: |
-            const { owner, repo } = context.repo;
-            await github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner,
-              repo,
-              body: `✅ **CI Passed**\n\n- MUSA device: detected\n- Unit tests: passed\n- Integration tests: passed\n\n[View logs](${process.env.GITHUB_SERVER_URL}/${owner}/${repo}/actions/runs/${context.runId})`
-            });
-            // 可选：自动添加标签
-            await github.rest.issues.addLabels({
-              issue_number: context.issue.number,
-              owner,
-              repo,
-              labels: ['ci-passed']
-            });
+      - name: Run integration tests
+        id: run-integration
+        if: steps.run-build.outputs.status == 'success'
+        run: |
+          if docker exec $CONTAINER bash -c "cd $PR_PATH && python test_runner.py"; then
+            echo "status=success" >> $GITHUB_OUTPUT
+          else
+            echo "status=failure" >> $GITHUB_OUTPUT
+          fi
+        continue-on-error: true
+
+      # 🌟 优化点 2：无论成功失败，确保清理垃圾
+      - name: Clean up container workspace
+        if: always() 
+        run: docker exec $CONTAINER rm -rf $PR_PATH
  
-      - name: Comment PR with result (failure)
-        if: steps.run-integration.outputs.status == 'failure' || steps.run-tests.outputs.status == 'failure'
+      # 🌟 优化点 3：整合状态判断逻辑
+      - name: Comment PR with result
+        if: always() # 必须 always，然后在脚本内部判断是成功还是失败
         uses: actions/github-script@v6
         with:
           script: |
+            const formatStatus = '${{ steps.run-format.outputs.status }}';
+            const buildStatus = '${{ steps.run-build.outputs.status }}';
+            const testStatus = '${{ steps.run-integration.outputs.status }}';
+            
+            const isSuccess = formatStatus === 'success' && buildStatus === 'success' && testStatus === 'success';
             const { owner, repo } = context.repo;
-            await github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner,
-              repo,
-              body: `❌ **CI Failed**\n\nPlease check:\n1. MUSA device availability\n2. Operator compatibility\n3. Test logs below\n\n[View logs](${process.env.GITHUB_SERVER_URL}/${owner}/${repo}/actions/runs/${context.runId})`
-            });
-            // 可选：自动添加标签
-            await github.rest.issues.addLabels({
-              issue_number: context.issue.number,
-              owner,
-              repo,
-              labels: ['ci-failed']
-            });
+            const runUrl = `${process.env.GITHUB_SERVER_URL}/${owner}/${repo}/actions/runs/${context.runId}`;
+            
+            if (isSuccess) {
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number, owner, repo,
+                body: `✅ **CI Passed**\n\n- Format check: passed\n- Build: passed\n- Tests: passed\n\n[View logs](${runUrl})`
+              });
+              await github.rest.issues.addLabels({ issue_number: context.issue.number, owner, repo, labels: ['ci-passed'] });
+            } else {
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number, owner, repo,
+                body: `❌ **CI Failed**\n\n- Format check: ${formatStatus}\n- Build: ${buildStatus}\n- Tests: ${testStatus}\n\n[View detailed logs to fix errors](${runUrl})`
+              });
+              await github.rest.issues.addLabels({ issue_number: context.issue.number, owner, repo, labels: ['ci-failed'] });
+            }
