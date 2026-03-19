@@ -835,7 +835,8 @@ Status MusaTensorDotFusion::Apply(GraphDef* graph,
     if (idx >= 0 && idx < graph->node_size()) {
       const NodeDef& node = graph->node(idx);
       for (int j = 0; j < node.input_size(); ++j) {
-        std::string producer = FusionGraphUtils::GetProducerNodeName(node.input(j));
+        std::string producer =
+            FusionGraphUtils::GetProducerNodeName(node.input(j));
         // 只记录不在融合子图内的输入节点
         if (producer != output_name && !fuse_node_names.count(producer) &&
             producer != input_a_name && producer != input_b_name) {
@@ -885,7 +886,8 @@ Status MusaTensorDotFusion::Apply(GraphDef* graph,
     for (int i = 0; i < graph->node_size(); ++i) {
       const NodeDef& node = graph->node(i);
       for (int j = 0; j < node.input_size(); ++j) {
-        std::string input_producer = FusionGraphUtils::GetProducerNodeName(node.input(j));
+        std::string input_producer =
+            FusionGraphUtils::GetProducerNodeName(node.input(j));
         if (input_producer == producer_name) {
           has_consumers = true;
           break;
