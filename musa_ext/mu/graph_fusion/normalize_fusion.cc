@@ -115,7 +115,8 @@ bool ExtractFloatScalar(const NodeDef* const_node, float* out_value) {
     return true;
   }
   if (!tp.tensor_content().empty()) {
-    const float* data = reinterpret_cast<const float*>(tp.tensor_content().data());
+    const float* data =
+        reinterpret_cast<const float*>(tp.tensor_content().data());
     *out_value = data[0];
     return true;
   }
@@ -199,8 +200,9 @@ std::vector<int> StringToIndices(const std::string& s) {
 }
 
 // Find Normalize prefix from node name
-// Example: "fwffm_pbp_mlp/ad_emb_aug_ln_layer/truediv" -> "fwffm_pbp_mlp/ad_emb_aug_ln_layer"
-// Rule: Extract from the beginning to the last '/' (excluding the last segment)
+// Example: "fwffm_pbp_mlp/ad_emb_aug_ln_layer/truediv" ->
+// "fwffm_pbp_mlp/ad_emb_aug_ln_layer" Rule: Extract from the beginning to the
+// last '/' (excluding the last segment)
 std::string FindNormalizePrefix(const std::string& node_name) {
   if (node_name.empty()) return "";
 
@@ -309,8 +311,8 @@ FusionMatchResult MusaNormalizeFusion::MatchFromRealDivNode(
   // =========================================================================
   if (realdiv_node.input_size() != 2) {
     VLOG(2) << "[Normalize::Match] FAIL step1: RealDiv input_size="
-            << realdiv_node.input_size() << " (need 2), node="
-            << realdiv_node.name();
+            << realdiv_node.input_size()
+            << " (need 2), node=" << realdiv_node.name();
     return result;
   }
 
@@ -319,8 +321,8 @@ FusionMatchResult MusaNormalizeFusion::MatchFromRealDivNode(
 
   if (!sub_node || !IsOp(*sub_node, "Sub")) {
     VLOG(2) << "[Normalize::Match] FAIL step1: input[0] is not Sub, actual="
-            << (sub_node ? sub_node->op() : "NULL") << ", node="
-            << realdiv_node.name();
+            << (sub_node ? sub_node->op() : "NULL")
+            << ", node=" << realdiv_node.name();
     return result;
   }
   if (!BelongsToNormalize(sub_node->name(), normalize_prefix)) {
@@ -329,9 +331,10 @@ FusionMatchResult MusaNormalizeFusion::MatchFromRealDivNode(
     return result;
   }
   if (!clip_node || !IsOp(*clip_node, "MusaClip")) {
-    VLOG(2) << "[Normalize::Match] FAIL step1: input[1] is not MusaClip, actual="
-            << (clip_node ? clip_node->op() : "NULL") << ", node="
-            << realdiv_node.name();
+    VLOG(2)
+        << "[Normalize::Match] FAIL step1: input[1] is not MusaClip, actual="
+        << (clip_node ? clip_node->op() : "NULL")
+        << ", node=" << realdiv_node.name();
     return result;
   }
   if (!BelongsToNormalize(clip_node->name(), normalize_prefix)) {
@@ -351,15 +354,16 @@ FusionMatchResult MusaNormalizeFusion::MatchFromRealDivNode(
   // =========================================================================
   if (clip_node->input_size() < 3) {
     VLOG(2) << "[Normalize::Match] FAIL step2: MusaClip input_size="
-            << clip_node->input_size() << " (need >=3), node="
-            << realdiv_node.name();
+            << clip_node->input_size()
+            << " (need >=3), node=" << realdiv_node.name();
     return result;
   }
 
   const NodeDef* sqrt_node = FindProducer(graph, clip_node->input(0));
   if (!sqrt_node || !IsOp(*sqrt_node, "Sqrt")) {
-    VLOG(2) << "[Normalize::Match] FAIL step2: MusaClip input[0] is not Sqrt, node="
-            << realdiv_node.name();
+    VLOG(2)
+        << "[Normalize::Match] FAIL step2: MusaClip input[0] is not Sqrt, node="
+        << realdiv_node.name();
     return result;
   }
   if (!BelongsToNormalize(sqrt_node->name(), normalize_prefix)) {
@@ -381,17 +385,20 @@ FusionMatchResult MusaNormalizeFusion::MatchFromRealDivNode(
 
   const NodeDef* expanddims_2 = FindProducer(graph, sqrt_node->input(0));
   if (!expanddims_2 || !IsOp(*expanddims_2, "ExpandDims")) {
-    VLOG(2) << "[Normalize::Match] FAIL step3: Sqrt input is not ExpandDims, node="
-            << realdiv_node.name();
+    VLOG(2)
+        << "[Normalize::Match] FAIL step3: Sqrt input is not ExpandDims, node="
+        << realdiv_node.name();
     return result;
   }
   if (!BelongsToNormalize(expanddims_2->name(), normalize_prefix)) {
-    VLOG(2) << "[Normalize::Match] FAIL step3: ExpandDims_2 not in prefix, name="
-            << expanddims_2->name();
+    VLOG(2)
+        << "[Normalize::Match] FAIL step3: ExpandDims_2 not in prefix, name="
+        << expanddims_2->name();
     return result;
   }
 
-  VLOG(2) << "[Normalize::Match] PASS step3: ExpandDims_2=" << expanddims_2->name();
+  VLOG(2) << "[Normalize::Match] PASS step3: ExpandDims_2="
+          << expanddims_2->name();
 
   // =========================================================================
   // 第4步: ExpandDims_2 的输入:
@@ -406,7 +413,8 @@ FusionMatchResult MusaNormalizeFusion::MatchFromRealDivNode(
 
   const NodeDef* mean_2 = FindProducer(graph, expanddims_2->input(0));
   if (!mean_2 || !IsOp(*mean_2, "Mean")) {
-    VLOG(2) << "[Normalize::Match] FAIL step4: ExpandDims_2 input[0] is not Mean, node="
+    VLOG(2) << "[Normalize::Match] FAIL step4: ExpandDims_2 input[0] is not "
+               "Mean, node="
             << realdiv_node.name();
     return result;
   }
@@ -431,8 +439,9 @@ FusionMatchResult MusaNormalizeFusion::MatchFromRealDivNode(
 
   const NodeDef* square_node = FindProducer(graph, mean_2->input(0));
   if (!square_node || !IsOp(*square_node, "Square")) {
-    VLOG(2) << "[Normalize::Match] FAIL step5: Mean_2 input[0] is not Square, node="
-            << realdiv_node.name();
+    VLOG(2)
+        << "[Normalize::Match] FAIL step5: Mean_2 input[0] is not Square, node="
+        << realdiv_node.name();
     return result;
   }
   if (!BelongsToNormalize(square_node->name(), normalize_prefix)) {
@@ -454,7 +463,8 @@ FusionMatchResult MusaNormalizeFusion::MatchFromRealDivNode(
 
   const NodeDef* square_input = FindProducer(graph, square_node->input(0));
   if (square_input != sub_node) {
-    VLOG(2) << "[Normalize::Match] FAIL step6: Square input is not the same Sub, node="
+    VLOG(2) << "[Normalize::Match] FAIL step6: Square input is not the same "
+               "Sub, node="
             << realdiv_node.name();
     return result;
   }
@@ -476,22 +486,26 @@ FusionMatchResult MusaNormalizeFusion::MatchFromRealDivNode(
   const NodeDef* expanddims_1 = FindProducer(graph, sub_node->input(1));
 
   if (!original_input) {
-    VLOG(2) << "[Normalize::Match] FAIL step7: cannot find original input, node="
-            << realdiv_node.name();
+    VLOG(2)
+        << "[Normalize::Match] FAIL step7: cannot find original input, node="
+        << realdiv_node.name();
     return result;
   }
   if (!expanddims_1 || !IsOp(*expanddims_1, "ExpandDims")) {
-    VLOG(2) << "[Normalize::Match] FAIL step7: Sub input[1] is not ExpandDims, node="
+    VLOG(2) << "[Normalize::Match] FAIL step7: Sub input[1] is not ExpandDims, "
+               "node="
             << realdiv_node.name();
     return result;
   }
   if (!BelongsToNormalize(expanddims_1->name(), normalize_prefix)) {
-    VLOG(2) << "[Normalize::Match] FAIL step7: ExpandDims_1 not in prefix, name="
-            << expanddims_1->name();
+    VLOG(2)
+        << "[Normalize::Match] FAIL step7: ExpandDims_1 not in prefix, name="
+        << expanddims_1->name();
     return result;
   }
 
-  VLOG(2) << "[Normalize::Match] PASS step7: original_input=" << original_input->name()
+  VLOG(2) << "[Normalize::Match] PASS step7: original_input="
+          << original_input->name()
           << ", ExpandDims_1=" << expanddims_1->name();
 
   // =========================================================================
@@ -507,7 +521,8 @@ FusionMatchResult MusaNormalizeFusion::MatchFromRealDivNode(
 
   const NodeDef* mean_1 = FindProducer(graph, expanddims_1->input(0));
   if (!mean_1 || !IsOp(*mean_1, "Mean")) {
-    VLOG(2) << "[Normalize::Match] FAIL step8: ExpandDims_1 input[0] is not Mean, node="
+    VLOG(2) << "[Normalize::Match] FAIL step8: ExpandDims_1 input[0] is not "
+               "Mean, node="
             << realdiv_node.name();
     return result;
   }
@@ -532,19 +547,22 @@ FusionMatchResult MusaNormalizeFusion::MatchFromRealDivNode(
 
   const NodeDef* mean_1_input = FindProducer(graph, mean_1->input(0));
   if (mean_1_input != original_input) {
-    VLOG(2) << "[Normalize::Match] FAIL step9: Mean_1 input[0] is not the same as original_input, node="
+    VLOG(2) << "[Normalize::Match] FAIL step9: Mean_1 input[0] is not the same "
+               "as original_input, node="
             << realdiv_node.name();
     return result;
   }
 
-  VLOG(2) << "[Normalize::Match] PASS step9: Mean_1 input matches original_input";
+  VLOG(2)
+      << "[Normalize::Match] PASS step9: Mean_1 input matches original_input";
 
   // =========================================================================
   // 提取 reduction_indices 和 epsilon
   // =========================================================================
   std::vector<int> reduction_indices = ExtractReductionIndices(graph, mean_1);
   if (reduction_indices.empty()) {
-    VLOG(2) << "[Normalize::Match] WARNING: could not extract reduction_indices, using default";
+    VLOG(2) << "[Normalize::Match] WARNING: could not extract "
+               "reduction_indices, using default";
     reduction_indices.push_back(-1);
   }
 
@@ -561,8 +579,9 @@ FusionMatchResult MusaNormalizeFusion::MatchFromRealDivNode(
   // Ensure epsilon is positive for numerical stability
   if (epsilon <= 0.0f) epsilon = 1e-6f;
 
-  VLOG(2) << "[Normalize::Match] reduction_indices=" << IndicesToString(reduction_indices)
-          << ", epsilon=" << epsilon << ", max_std=" << max_std;
+  VLOG(2) << "[Normalize::Match] reduction_indices="
+          << IndicesToString(reduction_indices) << ", epsilon=" << epsilon
+          << ", max_std=" << max_std;
 
   // =========================================================================
   // 构建匹配结果
@@ -592,7 +611,8 @@ FusionMatchResult MusaNormalizeFusion::MatchFromRealDivNode(
 
   result.captured_attrs["original_input"] = original_input->name();
   result.captured_attrs["normalize_prefix"] = normalize_prefix;
-  result.captured_attrs["reduction_indices"] = IndicesToString(reduction_indices);
+  result.captured_attrs["reduction_indices"] =
+      IndicesToString(reduction_indices);
 
   // Store epsilon as a string with scientific notation to preserve small values
   std::ostringstream epsilon_ss;
@@ -615,8 +635,7 @@ FusionMatchResult MusaNormalizeFusion::MatchFromRealDivNode(
   VLOG(1) << "[Normalize::Match] SUCCESS matched=" << realdiv_node.name()
           << ", input=" << original_input->name()
           << ", reduction_indices=" << IndicesToString(reduction_indices)
-          << ", epsilon=" << epsilon
-          << ", prefix=" << normalize_prefix
+          << ", epsilon=" << epsilon << ", prefix=" << normalize_prefix
           << ", fuse_nodes=" << result.matched_nodes.size();
 
   return result;
@@ -634,7 +653,8 @@ Status MusaNormalizeFusion::Apply(GraphDef* graph,
   }
 
   if (!IsKernelAvailable()) {
-    VLOG(2) << "[Normalize::Apply] RETURN: kernel not available, skipping fusion";
+    VLOG(2)
+        << "[Normalize::Apply] RETURN: kernel not available, skipping fusion";
     return Status::OK();
   }
 
@@ -642,7 +662,8 @@ Status MusaNormalizeFusion::Apply(GraphDef* graph,
   auto output_it = match_result.captured_nodes.find("output");
 
   if (output_it == match_result.captured_nodes.end()) {
-    VLOG(2) << "[Normalize::Apply] RETURN: missing output node in captured_nodes";
+    VLOG(2)
+        << "[Normalize::Apply] RETURN: missing output node in captured_nodes";
     return Status(error::INVALID_ARGUMENT,
                   "Missing output node in Normalize pattern");
   }
@@ -655,7 +676,8 @@ Status MusaNormalizeFusion::Apply(GraphDef* graph,
   // 检查是否已经融合过
   for (const auto& node : graph->node()) {
     if (node.name() == output_name && node.op() == "MusaNormalize") {
-      VLOG(2) << "[Normalize::Apply] RETURN: already fused, node=" << output_name;
+      VLOG(2) << "[Normalize::Apply] RETURN: already fused, node="
+              << output_name;
       return Status(error::ALREADY_EXISTS, "Already fused");
     }
   }
@@ -669,8 +691,7 @@ Status MusaNormalizeFusion::Apply(GraphDef* graph,
     input_name = original_input_it->second;
   } else {
     VLOG(2) << "[Normalize::Apply] RETURN: cannot determine input";
-    return Status(error::INVALID_ARGUMENT,
-                  "Cannot determine Normalize input");
+    return Status(error::INVALID_ARGUMENT, "Cannot determine Normalize input");
   }
 
   // 获取数据类型
@@ -809,7 +830,8 @@ Status MusaNormalizeFusion::Apply(GraphDef* graph,
 
   //   // 跳过已知共享的 Const 节点
   //   if (shared_const_nodes.count(producer_name)) {
-  //     VLOG(2) << "[Normalize::Apply] skipping shared const node: " << producer_name;
+  //     VLOG(2) << "[Normalize::Apply] skipping shared const node: " <<
+  //     producer_name;
   //     ++it;
   //     continue;
   //   }
@@ -847,8 +869,8 @@ Status MusaNormalizeFusion::Apply(GraphDef* graph,
 
   //   if (!has_consumers) {
   //     // 孤立节点，删除它
-  //     VLOG(2) << "[Normalize::Apply] removing orphan node: " << producer_name;
-  //     FusionGraphUtils::RemoveNode(graph, idx);
+  //     VLOG(2) << "[Normalize::Apply] removing orphan node: " <<
+  //     producer_name; FusionGraphUtils::RemoveNode(graph, idx);
   //     orphan_removed_count++;
   //     it = potential_orphan_producers.erase(it);
   //   } else {
@@ -929,8 +951,7 @@ Status MusaNormalizeFusion::Apply(GraphDef* graph,
 
   VLOG(1) << "[Normalize::Apply] SUCCESS fused to " << output_name
           << ", reduction_indices=" << IndicesToString(reduction_indices)
-          << ", epsilon=" << epsilon
-          << ", max_std=" << max_std
+          << ", epsilon=" << epsilon << ", max_std=" << max_std
           << ", removed=" << removed_count
           << ", graph_nodes=" << graph->node_size();
 

@@ -29,15 +29,16 @@ limitations under the License.
 //   When var >> eps^2: sqrt(var + eps^2) ≈ sqrt(var)
 //   When var << eps^2: sqrt(var + eps^2) ≈ eps
 
-#include "tensorflow/core/framework/bfloat16.h"
 #include <limits>
+
+#include "../utils_op.h"
+#include "tensorflow/core/framework/bfloat16.h"
 #include "tensorflow/core/framework/op.h"
 #include "tensorflow/core/framework/op_kernel.h"
 #include "tensorflow/core/framework/register_types.h"
 #include "tensorflow/core/framework/shape_inference.h"
 #include "tensorflow/core/framework/tensor.h"
 #include "tensorflow/core/framework/tensor_shape.h"
-#include "../utils_op.h"
 #include "utils/logging.h"
 
 namespace tensorflow {
@@ -90,8 +91,8 @@ class MusaNormalizeOp : public MusaOpKernel {
     musaStream_t stream = reinterpret_cast<musaStream_t>(handle.GetStream());
 
     VLOG(1) << "MusaNormalizeOp::Compute launching kernel, num_rows="
-            << num_rows << ", row_size=" << last_dim
-            << ", epsilon=" << epsilon_ << ", max_std=" << max_std_;
+            << num_rows << ", row_size=" << last_dim << ", epsilon=" << epsilon_
+            << ", max_std=" << max_std_;
 
     MUSA_KERNEL_TRACE_START("Kernel");
     LaunchNormalize<T>(input_ptr, output_ptr, num_rows, last_dim, epsilon_,
@@ -107,9 +108,9 @@ class MusaNormalizeOp : public MusaOpKernel {
 };
 
 // Register MUSA kernel
-#define REGISTER_MUSA_NORMALIZE(TYPE)                                       \
-  REGISTER_KERNEL_BUILDER(                                                   \
-      Name("MusaNormalize").Device("MUSA").TypeConstraint<TYPE>("T"),       \
+#define REGISTER_MUSA_NORMALIZE(TYPE)                                 \
+  REGISTER_KERNEL_BUILDER(                                            \
+      Name("MusaNormalize").Device("MUSA").TypeConstraint<TYPE>("T"), \
       MusaNormalizeOp<TYPE>);
 
 REGISTER_MUSA_NORMALIZE(float);
