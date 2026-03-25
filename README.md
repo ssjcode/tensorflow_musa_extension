@@ -4,11 +4,12 @@ TensorFlow MUSA Extension 是一个高性能的 TensorFlow 插件，专为摩尔
 
 ## 特性
 
-- **完整的算子支持**：涵盖深度学习训练和推理所需的核心算子
+- **完整的算子支持**：涵盖深度学习训练和推理所需的核心算子 
 - **高性能优化**：针对 MUSA 架构进行深度优化，包括内存访问模式和计算效率
 - **自动图优化**：支持 Layout 自动转换、算子融合和自动混合精度（AMP）
 - **无缝集成**：与 TensorFlow 生态系统完全兼容，无需修改现有代码
 - **设备管理**：完整的 MUSA 设备注册、内存管理和流式处理支持
+- **Kernel 调试支持**：内置 Kernel 执行时间统计功能，便于性能分析
 
 ## 快速开始
 
@@ -26,8 +27,10 @@ tensorflow_musa_extension/
 │   ├── mu/                 # MUSA 设备和优化器实现
 │   └── utils/              # 工具函数
 └── test/                   # 测试用例
-    ├── musa_test_utils.py  # 测试工具
-    └── *_test.py           # 各算子测试文件
+    ├── musa_test_utils.py  # 测试工具基类
+    ├── test_runner.py      # 测试运行器
+    ├── ops/                # 算子测试
+    └── fusion/             # 融合测试（e2e）
 ```
 
 ### 环境要求
@@ -42,8 +45,10 @@ tensorflow_musa_extension/
   - 默认安装路径: `/usr/local/musa`
 - **Python 依赖**
   - Python: >= 3.7
-  - TensorFlow: == 2.4.4
+  - TensorFlow: == 2.6.1
+  - protobuf: == 3.20.3
   - NumPy: >= 1.19.0
+  - pettytable: >= 3.0.0
 - **开发工具**:
   - pre-commit >= 3.0.0
   - pytest >= 6.0.0
@@ -65,19 +70,28 @@ tf.load_library("./build/libmusa_plugin.so")
 
 ## 构建指南
 
-### 1. 算子配置
+### 1. 编译模式
 
-在 `CMakeLists.txt` 文件中配置需要编译的算子：
+支持 Release 与 Debug 两种模式：
 
-- **算子选择**：在源文件配置区域启用所需的算子实现
-- **自定义内核**：如需使用 `.mu` 自定义内核实现，在 `set(MU_SOURCES "")` 中添加对应的源文件
+| 模式 | 命令 | 说明 |
+|------|------|------|
+| **Release** | `./build.sh` 或 `./build.sh release` | 优化性能，无调试开销 |
+| **Debug** | `./build.sh debug` | 开启 `MUSA_KERNEL_DEBUG`，启用 kernel timing 宏 |
 
 ### 2. 编译流程
 
 执行自动化构建脚本：
 
 ```bash
+# Release（默认）
 ./build.sh
+
+# Release（显式）
+./build.sh release
+
+# Debug（计时调试）
+./build.sh debug
 ```
 
 构建脚本将自动完成以下步骤：
@@ -85,38 +99,137 @@ tf.load_library("./build/libmusa_plugin.so")
 - 编译 MUSA 内核和主机代码
 - 生成动态链接库 `libmusa_plugin.so`
 
-### 3. 加载插件
+### 3. Kernel 计时（Debug 模式）
 
-编译成功后，在 TensorFlow 应用中加载插件：
+仅在 `./build.sh debug` 构建下生效（`MUSA_KERNEL_DEBUG=ON`）：
 
-```python
-import tensorflow as tf
-tf.load_library("/path/to/tensorflow_musa_extension/build/libmusa_plugin.so")
+运行时环境变量请见下方 [环境变量](#环境变量) 章节中的“日志调试”表格。
+
+#### 3.1 宏使用方式
+
+```cpp
+// 基础 guard
+MUSA_KERNEL_TIMING_GUARD(ctx);
+
+// 分段埋点
+MUSA_KERNEL_TRACE_START("Mem Alloc");
+// ... code block ...
+MUSA_KERNEL_TRACE_END("Mem Alloc");
+
+MUSA_KERNEL_TRACE_START("Kernel");
+// ... kernel launch ...
+MUSA_KERNEL_TRACE_END("Kernel");
+
+// 自定义阶段名
+MUSA_KERNEL_TRACE_START("State1");
+// ... allocate / pre-process ...
+MUSA_KERNEL_TRACE_END("State1");
+
+MUSA_KERNEL_TRACE_START("State2");
+// ... main kernel ...
+MUSA_KERNEL_TRACE_END("State2");
+```
+
+### 4. 常用验证命令（MatMul）
+
+```bash
+./build.sh debug
+
+export MUSA_TIMING_KERNEL_LEVEL=2
+export MUSA_TIMING_KERNEL_NAME=ALL
+export MUSA_TIMING_KERNEL_STATS=1
+
+```
+
+## 环境变量
+
+### 功能控制
+
+| 变量名 | 说明 | 示例 |
+|--------|------|------|
+| `MUSA_ENABLE_TF32` | 启用 TF32 加速 MatMul/Conv | `export MUSA_ENABLE_TF32=1` |
+| `MUSA_DUMP_GRAPHDEF` | 启用图优化调试，dump GraphDef | `export MUSA_DUMP_GRAPHDEF=1` |
+| `MUSA_DUMP_GRAPHDEF_DIR` | 指定 GraphDef dump 目录 | `export MUSA_DUMP_GRAPHDEF_DIR=/tmp/graphs` |
+
+### 日志调试
+
+| 变量名 | 说明 | 示例 |
+|--------|------|------|
+| `MUSA_TIMING_KERNEL_LEVEL` | Timing 模式控制（`1`=仅总耗时，`2`=总耗时+分段耗时） | `export MUSA_TIMING_KERNEL_LEVEL=2` |
+| `MUSA_TIMING_KERNEL_NAME` | 仅打印指定 Kernel（大小写不敏感子串匹配，`ALL` 为全部） | `export MUSA_TIMING_KERNEL_NAME=MatMul` |
+| `MUSA_TIMING_KERNEL_STATS` | 进程退出时打印 timing 汇总（`1`=开启，`0`=关闭） | `export MUSA_TIMING_KERNEL_STATS=1` |
+| `TF_CPP_MIN_LOG_LEVEL` | 全局日志级别（0=INFO, 1=WARNING, 2=ERROR） | `export TF_CPP_MIN_LOG_LEVEL=1` |
+| `TF_CPP_VMODULE` | 精确控制特定文件的 VLOG 级别 | `export TF_CPP_VMODULE="musa_graph_optimizer=1,layernorm_fusion=2"` |
+
+**常用调试组合：**
+
+```bash
+# 1. 查看图优化器的详细日志
+export TF_CPP_VMODULE="musa_graph_optimizer=1,fusion_pattern_manager=1"
+python -m fusion.layernorm_gelu_fusion_test
+
+# 2. 查看算子融合详细过程
+export TF_CPP_VMODULE="layernorm_fusion=2,gelu_fusion=1"
+python -m ops.layernorm_op_test
+
+# 3. 完全静音（只显示错误）
+export TF_CPP_MIN_LOG_LEVEL=2
+python test_runner.py
+
+# 4. 恢复默认日志
+unset TF_CPP_MIN_LOG_LEVEL TF_CPP_VMODULE
 ```
 
 ## 测试
 
-构建完成后，运行测试套件验证功能正确性。测试文件遵循 TensorFlow 官方 `python/kernel_tests` 风格，使用 `tf.test.TestCase` 作为基类。
+构建完成后，运行测试套件验证功能正确性。测试分为**算子测试**（`test/ops/`）和**融合测试**（`test/fusion/`）两类。
+
+### 运行单个测试
 
 ```bash
+cd test
+
 # 运行特定算子测试
-python test/add_op_test.py
-python test/matmul_op_test.py
+python -m ops.add_op_test
+python -m ops.matmul_op_test
 
-# 运行所有测试
-./test/run_all_tests.sh
-
-# 或者单独运行每个测试
-for test_file in test/*_op_test.py; do
-    python "$test_file"
-done
+# 运行融合测试
+python -m fusion.layernorm_gelu_fusion_test
 ```
 
-测试文件命名规范：
+### 使用测试运行器
+
+```bash
+cd test
+
+# 运行所有算子测试（默认）
+python test_runner.py
+
+# 运行所有融合测试
+python test_runner.py --fusion
+
+# 运行单个测试文件
+python test_runner.py --single ops/matmul_op_test.py
+python test_runner.py --single fusion/layernorm_gelu_fusion_test.py
+
+# 详细模式（显示每个测试的详细输出）
+python test_runner.py --detail
+
+# 安静模式（只显示进度条和摘要）
+python test_runner.py --quiet
+```
+
+### 测试文件命名规范
+
+**算子测试**（`test/ops/`）：
 - 使用 `op_name_op_test.py` 格式
-- 继承自 `tf.test.TestCase`
+- 继承自 `MUSATestCase`（封装了插件加载）
 - 测试方法以 `test_` 开头
-- 使用 `self.assert*` 系列方法进行断言
+
+**融合测试**（`test/fusion/`）：
+- 使用 `*_fusion_test.py` 格式
+- 继承自 `MUSATestCase`
+- 测试端到端的图优化和算子融合
 
 ## 支持的算子
 
@@ -127,6 +240,12 @@ done
 - **数据操作**：Reshape, Concat, Gather, StridedSlice, ExpandDims
 - **归一化**：LayerNorm, FusedBatchNorm
 - **特殊算子**：TensorInteraction, BiasAdd, Assign
+
+## 使用示例
+
+详细使用示例见：
+
+[![MUSA Playground](https://img.shields.io/badge/Gitee-TensorFlow_MUSA_Playground-C71D23?style=for-the-badge&logo=gitee&logoColor=white)](https://gitee.com/mthreadsacademy/tensorflow_musa_playground)
 
 ## 贡献指南
 

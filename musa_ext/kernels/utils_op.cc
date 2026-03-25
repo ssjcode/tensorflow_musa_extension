@@ -1,5 +1,6 @@
 #include "utils_op.h"
 
+#include "mu/kernel_register.h"
 #include "tensorflow/core/common_runtime/device_mgr.h"
 #include "tensorflow/core/framework/device_attributes.pb.h"
 
@@ -42,13 +43,24 @@ mType GetType(DataType t) {
 }
 }  // namespace
 
+// Helper function to convert musaError_t to mStatus (mudnn Status)
+static inline mStatus FromMusaError(musaError_t err) {
+  if (err == musaSuccess) return mStatus::SUCCESS;
+  // mudnn Status doesn't have OUT_OF_MEMORY, use INTERNAL_ERROR for all errors
+  return mStatus::INTERNAL_ERROR;
+}
+
 mStatus MusaFree(void* ptr) {
-  if (ptr) musaFree(ptr);
+  if (ptr) {
+    musaError_t err = musaFree(ptr);
+    return FromMusaError(err);
+  }
   return mStatus::SUCCESS;
 }
+
 mStatus MusaAllocate(size_t size, void** ptr) {
-  musaMalloc(ptr, size);
-  return mStatus::SUCCESS;
+  musaError_t err = musaMalloc(ptr, size);
+  return FromMusaError(err);
 }
 
 mTensor CreateMTensor(const Tensor& t, mFormat format) {
@@ -58,30 +70,34 @@ mTensor CreateMTensor(const Tensor& t, mFormat format) {
   rst.SetType(GetType(t.dtype()));
 
   auto dims_raw = t.shape().dim_sizes();
-  std::vector<int64_t> dims;
-  for (auto d : dims_raw) {
-    dims.push_back(d);
-  }
+  const int rank = static_cast<int>(dims_raw.size());
+  // Reuse TensorFlow's shape storage directly instead of copying dims into a
+  // temporary vector. For small elementwise ops this shaves a bit of host-side
+  // wrapper overhead.
+  const int64_t* dims =
+      reinterpret_cast<const int64_t*>(dims_raw.data());
 
-  if (dims.size() >= 4) {
+  if (rank >= 4) {
     rst.SetFormat(format);
   } else {
     rst.SetFormat(mFormat::NCHW);
   }
 
-  rst.SetNdInfo(static_cast<int>(dims.size()), dims.data());
+  rst.SetNdInfo(rank, dims);
   return rst;
 }
 
 mTensor CreateMTensor(const Tensor& t) {
   mTensor rst;
-  MTOP_CHECK_LOG(rst.SetAddr(t.data()), "SetAddr");
-  MTOP_CHECK_LOG(rst.SetType(GetType(t.dtype())), "SetType");
+  CHECK(rst.SetAddr(t.data()) == ::musa::dnn::Status::SUCCESS)
+      << "SetAddr failed";
+  CHECK(rst.SetType(GetType(t.dtype())) == ::musa::dnn::Status::SUCCESS)
+      << "SetType failed";
   auto dims_int = t.shape().dim_sizes();
-  MTOP_CHECK_LOG(
-      rst.SetNdInfo(static_cast<int>(dims_int.size()),
-                    reinterpret_cast<const int64_t*>(dims_int.data())),
-      "SetNdInfo");
+  CHECK(rst.SetNdInfo(static_cast<int>(dims_int.size()),
+                      reinterpret_cast<const int64_t*>(dims_int.data())) ==
+        ::musa::dnn::Status::SUCCESS)
+      << "SetNdInfo failed";
   return rst;
 }
 
@@ -97,9 +113,17 @@ mFormat GetMusaFormat(OpKernelConstruction* ctx) {
 
 MusaDevice* GetDeviceByCtx(tensorflow::OpKernelContext* context) {
   DeviceBase* device_base = context->device();
+  if (!device_base) {
+    LOG(ERROR) << "GetDeviceByCtx: device_base is null";
+    return nullptr;
+  }
   MusaDevice* musa_device = reinterpret_cast<MusaDevice*>(device_base);
-  if (!musa_device) return nullptr;
-  musaSetDevice(musa_device->get_device_id());
+  if (!musa_device) {
+    LOG(ERROR) << "GetDeviceByCtx: musa_device is null";
+    return nullptr;
+  }
+  // Note: musaSetDevice is called in GetHandleByCtx with caching
+  // We skip it here to avoid redundant calls
   return musa_device;
 }
 

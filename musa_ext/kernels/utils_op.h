@@ -6,10 +6,38 @@
 #include <vector>
 
 #include "mu/device/musa_device.h"
-#include "mu/kernel_register.h"
 #include "tensorflow/core/framework/op_kernel.h"
 #include "tensorflow/core/framework/tensor.h"
 #define DEVICE_MTGPU "MUSA"
+
+// 统一的错误处理宏
+#define MTOP_CHECK_MTDNN_STATUS_RET(status)         \
+  do {                                              \
+    if ((status) != ::musa::dnn::Status::SUCCESS) { \
+      return static_cast<mStatus>(1);               \
+    }                                               \
+  } while (0)
+
+#define MTOP_CHECK_OK(status, op_name, ctx)                                    \
+  do {                                                                         \
+    if ((status) != ::musa::dnn::Status::SUCCESS) {                            \
+      (ctx)->CtxFailure(errors::Internal(                                      \
+          "MUSA ", (op_name), " failed. Status: ", static_cast<int>(status))); \
+      return;                                                                  \
+    }                                                                          \
+  } while (0)
+
+#define MTOP_CHECK_OK_RUN(status, op_name, ctx)                              \
+  do {                                                                       \
+    auto _status = (status);                                                 \
+    if (_status != ::musa::dnn::Status::SUCCESS) {                           \
+      (ctx)->CtxFailure(                                                     \
+          errors::Internal("MUSA ", (op_name),                               \
+                           " failed. Status: ", static_cast<int>(_status))); \
+      return;                                                                \
+    }                                                                        \
+  } while (0)
+
 namespace tensorflow {
 namespace musa {
 
@@ -69,14 +97,36 @@ class MusaOpKernel : public OpKernel {
 
 MusaDevice* GetDeviceByCtx(tensorflow::OpKernelContext* context);
 
+// Thread-local cache for current device to avoid redundant musaSetDevice calls
+inline musaError_t CachedMusaSetDevice(int device_id) {
+  static thread_local int cached_device_id = -1;
+  if (device_id != cached_device_id) {
+    musaError_t err = musaSetDevice(device_id);
+    if (err == musaSuccess) {
+      cached_device_id = device_id;
+    }
+    return err;
+  }
+  return musaSuccess;
+}
+
 inline ::musa::dnn::Handle& GetHandleByCtx(
     tensorflow::OpKernelContext* context) {
   auto* musa_device = static_cast<MusaDevice*>(context->device());
   int device_id = musa_device->get_device_id();
 
-  musaSetDevice(device_id);
+  musaError_t err = CachedMusaSetDevice(device_id);
+  if (err != musaSuccess) {
+    LOG(ERROR) << "musaSetDevice failed: " << musaGetErrorString(err);
+  }
 
   return musa_device->mudnn_handle();
+}
+
+inline musaStream_t GetMusaStreamByCtx(tensorflow::OpKernelContext* context) {
+  auto* musa_device = static_cast<MusaDevice*>(context->device());
+  if (!musa_device) return nullptr;
+  return musa_device->GetStream();
 }
 
 }  // namespace musa

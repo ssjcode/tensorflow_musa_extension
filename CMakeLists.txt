@@ -8,6 +8,10 @@ set(CMAKE_CXX_COMPILER g++)
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Kernel debug/timing instrumentation switch.
+# OFF by default to keep production performance unchanged.
+option(MUSA_KERNEL_DEBUG "Enable MUSA kernel compute timing instrumentation" OFF)
+
 # Set MUSA path
 set(MUSA_PATH "/usr/local/musa" CACHE STRING "Path to MUSA installation")
 set(MCC_EXECUTABLE "${MUSA_PATH}/bin/mcc")
@@ -38,15 +42,45 @@ string(REPLACE "-D_GLIBCXX_USE_CXX11_ABI=1" "" TF_COMPILE_FLAGS "${TF_COMPILE_FL
 # Re-add the safest definition
 set(TF_COMPILE_FLAGS "${TF_COMPILE_FLAGS} -D_GLIBCXX_USE_CXX11_ABI=0")
 
-# Add compile definitions to disable debug logging
-set(TF_COMPILE_FLAGS "${TF_COMPILE_FLAGS} -DMUSA_DISABLE_DEBUG_LOGGING -DNDEBUG -DMUSA_DISABLE_TRACE_LOGGING -DMUSA_DISABLE_AUTO_TRACE")
+# Configure debug/logging-related compile definitions.
+#
+# Important: this plugin links against the pip TensorFlow wheel, which is built
+# in release mode. Some TensorFlow headers (for example refcount.h) contain
+# inline DCHECK-dependent side effects. If the plugin is compiled without
+# NDEBUG while libtensorflow_framework is compiled with NDEBUG, the plugin and
+# framework can disagree on RefCounted teardown semantics and trigger false
+# refcount aborts during session/resource destruction.
+#
+# Keep NDEBUG enabled in every build to match the TensorFlow wheel, and use
+# MUSA_KERNEL_DEBUG only for plugin-local timing/debug instrumentation.
+if(MUSA_KERNEL_DEBUG)
+    set(TF_COMPILE_FLAGS "${TF_COMPILE_FLAGS} -DMUSA_KERNEL_DEBUG -DNDEBUG")
+else()
+    set(TF_COMPILE_FLAGS "${TF_COMPILE_FLAGS} -DMUSA_DISABLE_DEBUG_LOGGING -DNDEBUG -DMUSA_DISABLE_TRACE_LOGGING -DMUSA_DISABLE_AUTO_TRACE")
+endif()
 
 # Include paths
 include_directories("${TF_INC}" "${MUSA_PATH}/include")
 
+# Include TensorFlow C++ core headers for common_runtime
+# These are required for accessing BFCAllocator and device-specific headers
+include_directories("${TF_INC}/tensorflow/core/common_runtime")
+include_directories("${TF_INC}/tensorflow/core/common_runtime/device")
+
+# TensorFlow pip headers may place farmhash in different external include layouts.
+# fingerprint.h includes <farmhash.h>, so add whichever location exists.
+set(TF_FARMHASH_INC_SRC "${TF_INC}/external/farmhash_archive/src")
+set(TF_FARMHASH_INC_VIRTUAL "${TF_INC}/external/farmhash_archive/_virtual_includes/farmhash")
+if(EXISTS "${TF_FARMHASH_INC_SRC}/farmhash.h")
+    include_directories("${TF_FARMHASH_INC_SRC}")
+endif()
+if(EXISTS "${TF_FARMHASH_INC_VIRTUAL}/farmhash.h")
+    include_directories("${TF_FARMHASH_INC_VIRTUAL}")
+endif()
+
 # Define source root directory
 set(SRC_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/musa_ext")
-include_directories("${SRC_ROOT}" "${SRC_ROOT}/mu")
+include_directories("${SRC_ROOT}" "${SRC_ROOT}/mu" "${SRC_ROOT}/kernels")
 
 # Validate source directory exists
 if(NOT EXISTS "${SRC_ROOT}")
@@ -66,21 +100,35 @@ file(GLOB_RECURSE CPP_SOURCES
 # filter out disabled kernels (if any)
 # list(FILTER CPP_SOURCES EXCLUDE REGEX ".*test.*|.*disabled.*")
 # Automatically collect MUSA Kernel files
-file(GLOB MU_SOURCES "${SRC_ROOT}/kernels/*.mu")
+file(GLOB_RECURSE MU_SOURCES "${SRC_ROOT}/kernels/*.mu")
+
+# TensorFlow headers pulled into `.mu` compilation require C++17, and mcc's
+# aarch64 host predefines can incorrectly trigger NEON-only host headers.
+set(MCC_COMMON_FLAGS
+    -O3
+    -fPIC
+    -std=c++17
+    -DEIGEN_DONT_VECTORIZE
+    -U__ARM_NEON
+    -U__ARM_NEON__
+    -I${MUSA_PATH}/include
+    -I${TF_INC}
+)
 
 # MCC compile MUSA Kernel
 set(MU_OBJECTS "")
 foreach(mu_file ${MU_SOURCES})
     get_filename_component(filename ${mu_file} NAME)
     if(NOT filename MATCHES "^disabled_")
-        get_filename_component(basename ${mu_file} NAME_WE)
-        set(obj_file "${CMAKE_CURRENT_BINARY_DIR}/${basename}.mu.o")
+        file(RELATIVE_PATH mu_rel_path "${SRC_ROOT}/kernels" "${mu_file}")
+        string(REPLACE "/" "_" mu_rel_obj "${mu_rel_path}")
+        string(REPLACE ".mu" "" mu_rel_obj "${mu_rel_obj}")
+        set(obj_file "${CMAKE_CURRENT_BINARY_DIR}/${mu_rel_obj}.mu.o")
         set(mu_full_path "${mu_file}")
 
         add_custom_command(
             OUTPUT ${obj_file}
-            COMMAND ${MCC_EXECUTABLE} -c ${mu_full_path} -o ${obj_file}
-            -O3 -fPIC -I${MUSA_PATH}/include -I${TF_INC}
+            COMMAND ${MCC_EXECUTABLE} -c ${mu_full_path} -o ${obj_file} ${MCC_COMMON_FLAGS}
             DEPENDS ${mu_full_path}
             COMMENT "Compiling MUSA kernel: ${filename}"
         )
@@ -124,5 +172,6 @@ list(LENGTH MU_SOURCES MU_SOURCES_COUNT)
 message(STATUS "TensorFlow MUSA Plugin Configuration:")
 message(STATUS "  MUSA Path: ${MUSA_PATH}")
 message(STATUS "  TensorFlow Include: ${TF_INC}")
+message(STATUS "  MUSA Kernel Debug: ${MUSA_KERNEL_DEBUG}")
 message(STATUS "  Source Files: ${CPP_SOURCES_COUNT} C++ files, ${MU_SOURCES_COUNT} MUSA kernels")
 message(STATUS "  Output: ${CMAKE_CURRENT_BINARY_DIR}/libmusa_plugin.so")

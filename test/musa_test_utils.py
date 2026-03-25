@@ -15,8 +15,22 @@
 
 """Utilities for MUSA kernel tests."""
 
+import logging
 import os
+import sys
+import unittest
 import tensorflow as tf
+
+
+def _get_test_full_name(test_method):
+  """Get the full name of a test method in format 'module.class.method'."""
+  test_class = test_method.__self__.__class__
+  module_name = test_class.__module__
+  # Extract just the filename without path and extension
+  module_file = module_name.split('.')[-1] if module_name else 'unknown'
+  class_name = test_class.__name__
+  method_name = test_method.__name__
+  return f"{module_file}.{class_name}.{method_name}"
 
 
 def load_musa_plugin():
@@ -46,7 +60,7 @@ def load_musa_plugin():
   if plugin_path and os.path.exists(plugin_path):
     try:
       tf.load_library(plugin_path)
-      print(f"SUCCESS: MUSA plugin loaded from {plugin_path}!")
+      # print(f"SUCCESS: MUSA plugin loaded from {plugin_path}!")
     except Exception as e:
       print(f"FAILED: Error loading plugin from {plugin_path}: {e}")
       raise
@@ -59,18 +73,24 @@ def load_musa_plugin():
     )
 
 
+# Import tensorflow first (load_musa_plugin needs it)
+import tensorflow as tf
+
+# Load plugin immediately after importing tensorflow
+load_musa_plugin()
+
+
 class MUSATestCase(tf.test.TestCase):
   """Base test class for MUSA kernel tests."""
 
   @classmethod
   def setUpClass(cls):
-    """Set up the test class by loading the MUSA plugin."""
+    """Set up the test class."""
     super(MUSATestCase, cls).setUpClass()
-    load_musa_plugin()
 
-    # Verify MUSA device is available
+    # Verify MUSA device is available (plugin already loaded at module import)
     if not tf.config.list_physical_devices('MUSA'):
-      raise RuntimeError("No MUSA devices found.")
+      raise unittest.SkipTest("No MUSA devices found.")
 
   def _test_op_device_placement(self, op_func, input_tensors, device):
     """Test operation on specified device."""
@@ -111,11 +131,29 @@ class MUSATestCase(tf.test.TestCase):
     This overrides the parent class method to provide more concise error messages.
 
     Args:
-      a, b: Arrays to compare
+      a, b: Arrays to compare (can be numpy arrays or TensorFlow tensors)
       rtol, atol: Relative and absolute tolerance
       max_diffs_to_show: Maximum number of differing elements to show
     """
     import numpy as np
+    import tensorflow as tf
+
+    # Convert TensorFlow tensors to numpy arrays
+    if hasattr(a, 'numpy'):
+      a = a.numpy()
+    if hasattr(b, 'numpy'):
+      b = b.numpy()
+
+    # Handle bfloat16 by converting to float32 for comparison
+    # bfloat16 is not a standard numpy type
+    if hasattr(a, 'dtype') and a.dtype == tf.bfloat16.as_numpy_dtype:
+      a = a.astype(np.float32) if hasattr(a, 'astype') else np.array(a, dtype=np.float32)
+    if hasattr(b, 'dtype') and b.dtype == tf.bfloat16.as_numpy_dtype:
+      b = b.astype(np.float32) if hasattr(b, 'astype') else np.array(b, dtype=np.float32)
+
+    # Ensure both are numpy arrays
+    a = np.array(a)
+    b = np.array(b)
 
     # Use numpy's allclose for the actual comparison
     if np.allclose(a, b, rtol=rtol, atol=atol):

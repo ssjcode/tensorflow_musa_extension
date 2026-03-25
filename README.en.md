@@ -9,15 +9,49 @@ TensorFlow MUSA Extension is a high-performance TensorFlow plugin specifically d
 - **Automatic Graph Optimization**: Supports automatic layout conversion, operator fusion, and Automatic Mixed Precision (AMP)
 - **Seamless Integration**: Fully compatible with TensorFlow ecosystem without requiring code modifications
 - **Device Management**: Complete MUSA device registration, memory management, and stream processing support
+- **Kernel Debugging Support**: Built-in kernel execution time statistics for performance analysis
 
 ## Quick Start
 
+### Directory Structure
+
+```
+tensorflow_musa_extension/
+├── CMakeLists.txt          # CMake build configuration
+├── build.sh                # Build script
+├── .clang-format           # Code formatting configuration
+├── .pre-commit-config.yaml # pre-commit hook configuration
+├── .gitlab-ci.yml          # CI/CD configuration
+├── musa_ext/               # Core source directory
+│   ├── kernels/            # MUSA kernel implementations
+│   ├── mu/                 # MUSA device and optimizer implementations
+│   └── utils/              # Utility functions
+└── test/                   # Test cases
+    ├── musa_test_utils.py  # Test utilities base class
+    ├── test_runner.py      # Test runner
+    ├── ops/                # Operator tests
+    └── fusion/             # Fusion tests (e2e)
+```
+
 ### Prerequisites
 
-- TensorFlow 2.x
-- Moore Threads MUSA Driver and SDK
-- CMake 3.15+
-- GCC/G++ 7.0+
+- **Build Tools**:
+  - CMake (version >= 3.10)
+  - Make
+- **MUSA SDK**:
+  - MUSA Runtime (>= 1.0)
+  - muBLAS Library
+  - muDNN Library
+  - Default installation path: `/usr/local/musa`
+- **Python Dependencies**:
+  - Python: >= 3.7
+  - TensorFlow: == 2.6.1
+  - protobuf: == 3.20.3
+  - NumPy: >= 1.19.0
+  - prettytable: >= 3.0.0
+- **Development Tools**:
+  - pre-commit >= 3.0.0
+  - pytest >= 6.0.0
 
 ### Installation
 
@@ -36,19 +70,28 @@ tf.load_library("./build/libmusa_plugin.so")
 
 ## Build Guide
 
-### 1. Operator Configuration
+### 1. Build Type
 
-Configure operators to be compiled in the `CMakeLists.txt` file:
+Both Release and Debug modes are supported:
 
-- **Operator Selection**: Enable required operator implementations in the source file configuration section
-- **Custom Kernels**: If using `.mu` custom kernel implementations, add corresponding source files to `set(MU_SOURCES "")`
+| Mode | Command | Description |
+|------|---------|-------------|
+| **Release** | `./build.sh` or `./build.sh release` | Optimized for performance, no debug overhead |
+| **Debug** | `./build.sh debug` | Enables `MUSA_KERNEL_DEBUG` and kernel timing macros |
 
 ### 2. Compilation Process
 
 Execute the automated build script:
 
 ```bash
+# Release (default)
 ./build.sh
+
+# Release (explicit)
+./build.sh release
+
+# Debug (timing instrumentation)
+./build.sh debug
 ```
 
 The build script automatically completes the following steps:
@@ -56,66 +99,139 @@ The build script automatically completes the following steps:
 - Compiles MUSA kernels and host code
 - Generates the dynamic library `libmusa_plugin.so`
 
-### 3. Plugin Loading
+### 3. Kernel Timing (Debug Build)
 
-After successful compilation, load the plugin in your TensorFlow application:
+Only effective when built with `./build.sh debug` (`MUSA_KERNEL_DEBUG=ON`):
 
-```python
-import tensorflow as tf
-tf.load_library("/path/to/tensorflow_musa_extension/build/libmusa_plugin.so")
+Runtime environment variables are listed in the [Environment Variables](#environment-variables) section under "Logging and Debugging".
+
+#### 3.1 Macro Usage
+
+```cpp
+// Basic guard
+MUSA_KERNEL_TIMING_GUARD(ctx);
+
+// Section timing
+MUSA_KERNEL_TRACE_START("Mem Alloc");
+// ... code block ...
+MUSA_KERNEL_TRACE_END("Mem Alloc");
+
+MUSA_KERNEL_TRACE_START("Kernel");
+// ... kernel launch ...
+MUSA_KERNEL_TRACE_END("Kernel");
+
+// Custom section names
+MUSA_KERNEL_TRACE_START("State1");
+// ... allocate / pre-process ...
+MUSA_KERNEL_TRACE_END("State1");
+
+MUSA_KERNEL_TRACE_START("State2");
+// ... main kernel ...
+MUSA_KERNEL_TRACE_END("State2");
 ```
 
-## Directory Structure
+### 4. Common Validation Commands (MatMul)
 
+```bash
+./build.sh debug
+
+export MUSA_TIMING_KERNEL_LEVEL=2
+export MUSA_TIMING_KERNEL_NAME=ALL
+export MUSA_TIMING_KERNEL_STATS=1
+
+mkdir -p /tmp/musa_timing_logs
+python test/test_runner.py --single matmul_op_test.py 2>&1 | tee /tmp/musa_timing_logs/matmul_l2.log
 ```
-tensorflow_musa_extension/
-├── tensorflow_musa/          # Core implementation directory
-│   ├── kernels/             # Operator implementations
-│   │   ├── musa_*_op.cc     # Specific implementations of various operators
-│   │   └── utils_op.h       # Operator utility functions
-│   ├── mu/                  # MUSA device core components
-│   │   ├── device/          # Device low-level implementations
-│   │   │   ├── musa_device.h    # Device registration and management
-│   │   │   ├── musa_allocator.h # Memory allocator
-│   │   │   ├── musa_memcpy.h    # Memory copy operations
-│   │   │   └── musa_stream.h    # Stream processing support
-│   │   ├── optimizer/       # Graph optimization modules
-│   │   │   ├── musa_layout_optimizer.cc  # Layout automatic optimization
-│   │   │   ├── musa_remapper_optimizer.cc # Operator fusion optimization
-│   │   │   └── musa_amp_optimizer.cc     # Automatic Mixed Precision optimization
-│   │   ├── device_register.cc   # Device registration logic
-│   │   └── kernel_register.cc   # Operator registration logic
-│   └── utils/               # Utility functions
-│       └── logging.h        # Logging utilities
-├── test/                    # Functional test scripts
-│   └── test_*.py            # Unit tests for individual operators
-├── build.sh                 # Automated build script
-└── README.en.md             # Project documentation
+
+## Environment Variables
+
+### Feature Control
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `MUSA_ENABLE_TF32` | Enable TF32 acceleration for MatMul/Conv | `export MUSA_ENABLE_TF32=1` |
+| `MUSA_DUMP_GRAPHDEF` | Enable graph optimization debugging | `export MUSA_DUMP_GRAPHDEF=1` |
+| `MUSA_DUMP_GRAPHDEF_DIR` | Specify GraphDef dump directory | `export MUSA_DUMP_GRAPHDEF_DIR=/tmp/graphs` |
+
+### Logging and Debugging
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `MUSA_TIMING_KERNEL_LEVEL` | Timing mode (`1`=total only, `2`=total + per-section breakdown) | `export MUSA_TIMING_KERNEL_LEVEL=2` |
+| `MUSA_TIMING_KERNEL_NAME` | Print only selected kernels (case-insensitive substring, `ALL` for all) | `export MUSA_TIMING_KERNEL_NAME=MatMul` |
+| `MUSA_TIMING_KERNEL_STATS` | Print timing summary at process exit (`1`=on, `0`=off) | `export MUSA_TIMING_KERNEL_STATS=1` |
+| `TF_CPP_MIN_LOG_LEVEL` | Global log level (0=INFO, 1=WARNING, 2=ERROR) | `export TF_CPP_MIN_LOG_LEVEL=1` |
+| `TF_CPP_VMODULE` | Per-file VLOG level control | `export TF_CPP_VMODULE="musa_graph_optimizer=1,layernorm_fusion=2"` |
+
+**Common debugging combinations:**
+
+```bash
+# 1. View detailed graph optimizer logs
+export TF_CPP_VMODULE="musa_graph_optimizer=1,fusion_pattern_manager=1"
+python -m fusion.layernorm_gelu_fusion_test
+
+# 2. View operator fusion details
+export TF_CPP_VMODULE="layernorm_fusion=2,gelu_fusion=1"
+python -m fusion.layernorm_gelu_fusion_test
+
+# 3. Silent mode (show errors only)
+export TF_CPP_MIN_LOG_LEVEL=2
+python test_runner.py
+
+# 4. Restore default logging
+unset TF_CPP_MIN_LOG_LEVEL TF_CPP_VMODULE
 ```
 
 ## Testing
 
-After building, run the test suite to verify functional correctness. Test files follow TensorFlow's official `python/kernel_tests` style, using `tf.test.TestCase` as the base class.
+After building, run the test suite to verify functional correctness. Tests are divided into **operator tests** (`test/ops/`) and **fusion tests** (`test/fusion/`).
+
+### Running Individual Tests
 
 ```bash
+cd test
+
 # Run specific operator tests
-python test/add_op_test.py
-python test/matmul_op_test.py
+python -m ops.add_op_test
+python -m ops.matmul_op_test
 
-# Run all tests
-./test/run_all_tests.sh
-
-# Or run each test individually
-for test_file in test/*_op_test.py; do
-    python "$test_file"
-done
+# Run fusion tests
+python -m fusion.layernorm_gelu_fusion_test
 ```
 
-Test file naming convention:
+### Using Test Runner
+
+```bash
+cd test
+
+# Run all operator tests (default)
+python test_runner.py
+
+# Run all fusion tests
+python test_runner.py --fusion
+
+# Run single test file
+python test_runner.py --single ops/matmul_op_test.py
+python test_runner.py --single fusion/layernorm_gelu_fusion_test.py
+
+# Detail mode (show detailed output for each test)
+python test_runner.py --detail
+
+# Quiet mode (show only progress bar and summary)
+python test_runner.py --quiet
+```
+
+### Test File Naming Convention
+
+**Operator Tests** (`test/ops/`):
 - Use `op_name_op_test.py` format
-- Inherit from `tf.test.TestCase`
+- Inherit from `MUSATestCase` (wraps plugin loading)
 - Test methods start with `test_`
-- Use `self.assert*` methods for assertions
+
+**Fusion Tests** (`test/fusion/`):
+- Use `*_fusion_test.py` format
+- Inherit from `MUSATestCase`
+- Test end-to-end graph optimization and operator fusion
 
 ## Supported Operators
 
@@ -141,6 +257,6 @@ Contributions for new operator implementations or optimizations are welcome! Con
 
 This project is licensed under Apache 2.0.
 
-## Support
+## Technical Support
 
 For issues or questions, please submit an Issue or contact the project maintainers.
