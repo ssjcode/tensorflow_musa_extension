@@ -68,17 +68,6 @@ def layernorm_numpy(x_np, gamma_np, beta_np, epsilon):
 class FuseLayerNormV2FusionE2ETest(MUSATestCase):
     """End-to-end tests for MusaFuseLayerNormV2 fusion."""
 
-    # def _load_after_fusion_dump(self, dump_dir):
-    #     dump_files = sorted(glob.glob(os.path.join(dump_dir, "*_after_fusion.pbtxt")))
-    #     self.assertTrue(dump_files, f"No after_fusion dump found in {dump_dir}")
-
-    #     with open(dump_files[-1], "r", encoding="utf-8") as handle:
-    #         dump_text = handle.read()
-
-    #     graph_def = graph_pb2.GraphDef()
-    #     text_format.Parse(dump_text, graph_def)
-    #     return dump_text, graph_def
-    
     def _load_after_fusion_dump(self, dump_dir):
         dump_files = sorted(glob.glob(os.path.join(dump_dir, "*_after_fusion.pb")))
         self.assertTrue(dump_files, f"No after_fusion dump found in {dump_dir}")
